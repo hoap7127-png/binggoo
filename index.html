@@ -1,0 +1,1206 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BINGO 25 Số (5x5) - Chơi 2 Máy Online</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Thư viện PeerJS dự phòng giúp 2 máy khác nhau kết nối trực tiếp khi bạn đẩy file HTML lên host bất kỳ -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            background: radial-gradient(circle at top, #1e1b4b 0%, #0f172a 60%, #020617 100%);
+            color: #f8fafc;
+            min-height: 100vh;
+            overflow-x: hidden;
+            user-select: none;
+        }
+        .glass-card {
+            background: rgba(30, 41, 59, 0.78);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+        }
+        .bingo-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 0.5rem;
+        }
+        @media (min-width: 640px) {
+            .bingo-grid {
+                gap: 0.65rem;
+            }
+        }
+        .bingo-cell {
+            aspect-ratio: 1 / 1;
+            transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+        .bingo-cell:active:not(:disabled) {
+            transform: scale(0.92);
+        }
+        @keyframes popIn {
+            0% { transform: scale(0.7); opacity: 0.4; }
+            70% { transform: scale(1.08); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-pop {
+            animation: popIn 0.22s ease-out forwards;
+        }
+        /* Hiệu ứng ô nằm trên đường đã hoàn thành (Ngang/Dọc/Chéo) */
+        .cell-line-complete {
+            background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%) !important;
+            color: #ffffff !important;
+            border-color: #fde047 !important;
+            box-shadow: 0 0 16px rgba(251, 191, 36, 0.55);
+        }
+        /* Hiệu ứng ô đã được chọn nhưng chưa tạo thành đường */
+        .cell-marked {
+            background: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);
+            color: #ffffff;
+            border-color: #f472b6;
+        }
+        /* Hiệu ứng số vừa mới được gọi */
+        .cell-last-called::after {
+            content: 'MỚI';
+            position: absolute;
+            top: -6px;
+            right: -4px;
+            background: #fde047;
+            color: #0f172a;
+            font-size: 9px;
+            font-weight: 900;
+            padding: 1px 5px;
+            border-radius: 999px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+    </style>
+</head>
+<body class="p-3 sm:p-6 flex flex-col items-center justify-center min-h-screen">
+
+    <!-- HEADER CHÍNH -->
+    <header class="w-full max-w-lg text-center mb-4">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 text-xs font-semibold mb-2">
+            <span id="net-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+            <span id="net-status">Đang khởi tạo kết nối Đám Mây...</span>
+        </div>
+        <h1 class="text-3xl sm:text-4xl font-black tracking-tight bg-gradient-to-r from-amber-300 via-pink-400 to-cyan-300 bg-clip-text text-transparent drop-shadow">
+            BINGO 25 SỐ (5×5)
+        </h1>
+        <p class="text-xs sm:text-sm text-slate-300 mt-1">
+            Xếp số từ 1–25 • Gọi số luân phiên • Ai đủ <b class="text-amber-300">5 đường</b> trước sẽ thắng!
+        </p>
+    </header>
+
+    <!-- KHUNG CHÍNH -->
+    <main class="w-full max-w-lg glass-card rounded-3xl p-4 sm:p-6 shadow-2xl relative">
+
+        <!-- ==========================================
+             MÀN HÌNH 1: SẢNH CHỜ (TẠO / VÀO PHÒNG)
+             ========================================== -->
+        <section id="view-lobby" class="space-y-5">
+            <!-- Nhập tên người chơi -->
+            <div class="bg-slate-900/70 p-4 rounded-2xl border border-white/10">
+                <label class="block text-xs font-bold uppercase tracking-wider text-amber-300 mb-1.5">
+                    👤 Tên của bạn
+                </label>
+                <input id="inp-player-name" type="text" maxlength="18" value="Người chơi" placeholder="Nhập tên của bạn..."
+                    class="w-full px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white font-bold focus:outline-none focus:ring-2 focus:ring-amber-400">
+            </div>
+
+            <!-- 2 Cột: Tạo phòng hoặc Vào phòng -->
+            <div id="lobby-actions" class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <!-- Tạo phòng -->
+                <div class="bg-gradient-to-b from-amber-500/15 to-orange-600/10 border border-amber-400/40 rounded-2xl p-4 flex flex-col justify-between space-y-4">
+                    <div>
+                        <div class="flex items-center gap-2 font-extrabold text-amber-300 text-base">
+                            <span>🏠 Máy 1: Tạo Phòng</span>
+                        </div>
+                        <p class="text-xs text-slate-300 mt-1 leading-relaxed">
+                            Tạo một mã phòng 4 chữ số và gửi cho người kia nhập vào máy của họ.
+                        </p>
+                    </div>
+                    <button id="btn-create" onclick="handleCreateRoom()"
+                        class="w-full py-3 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-extrabold shadow-lg transition cursor-pointer">
+                        ➕ Tạo Phòng Mới
+                    </button>
+                </div>
+
+                <!-- Vào phòng -->
+                <div class="bg-gradient-to-b from-cyan-500/15 to-blue-600/10 border border-cyan-400/40 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                    <div>
+                        <div class="font-extrabold text-cyan-300 text-base">🔑 Máy 2: Vào Phòng</div>
+                        <p class="text-xs text-slate-300 mt-1">Nhập mã 4 số từ máy bạn bè:</p>
+                        <input id="inp-room-code" type="text" inputmode="numeric" maxlength="4" placeholder="VD: 4829"
+                            class="mt-2 w-full px-3 py-2 rounded-xl bg-slate-900 border border-cyan-400/50 text-center text-xl font-black tracking-widest text-amber-300 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-400">
+                    </div>
+                    <button id="btn-join" onclick="handleJoinRoom()"
+                        class="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-extrabold shadow-lg transition cursor-pointer">
+                        🚀 Vào Phòng Ngay
+                    </button>
+                </div>
+            </div>
+
+            <!-- Thông báo lỗi nếu có -->
+            <div id="lobby-error" class="hidden bg-rose-500/20 border border-rose-400/50 text-rose-200 text-xs sm:text-sm px-4 py-2.5 rounded-xl text-center font-semibold"></div>
+
+            <!-- Khung Đang chờ người thứ 2 vào phòng -->
+            <div id="lobby-waiting" class="hidden bg-slate-900/90 border-2 border-amber-400/50 rounded-2xl p-5 text-center space-y-4">
+                <p class="text-xs font-bold uppercase tracking-wider text-amber-200">
+                    Mã phòng của bạn (Hãy đọc cho máy kia nhập):
+                </p>
+                <div class="flex items-center justify-center gap-3">
+                    <span id="txt-room-code" class="text-4xl sm:text-5xl font-black tracking-widest text-amber-300 bg-slate-800 px-6 py-3 rounded-2xl border border-amber-400/40">
+                        ----
+                    </span>
+                    <button onclick="copyCode()" class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-bold transition cursor-pointer">
+                        📋 Copy
+                    </button>
+                </div>
+                <p id="copy-notice" class="hidden text-xs text-emerald-400 font-bold">✅ Đã sao chép mã phòng!</p>
+
+                <div class="flex items-center justify-center gap-2 text-pink-300 text-sm font-semibold py-2">
+                    <span class="inline-block w-4 h-4 border-2 border-pink-400 border-t-transparent rounded-full animate-spin"></span>
+                    <span>Đang đợi người chơi thứ 2 vào phòng...</span>
+                </div>
+
+                <button onclick="cancelWaitingRoom()" class="px-5 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-500 text-xs font-bold transition cursor-pointer">
+                    ✖ Hủy phòng
+                </button>
+            </div>
+
+            <!-- Chế độ phụ: Test nhanh với Máy (AI) -->
+            <div class="pt-2 border-t border-white/10 flex items-center justify-between text-xs text-slate-400">
+                <span>Bạn muốn chơi thử 1 mình trước?</span>
+                <button onclick="startBotPractice()" class="text-indigo-300 hover:text-amber-300 font-bold underline cursor-pointer">
+                    🤖 Đấu thử với Máy (AI)
+                </button>
+            </div>
+        </section>
+
+        <!-- ==========================================
+             MÀN HÌNH 2: XẾP SỐ BÍ MẬT TỪ 1 ĐẾN 25
+             ========================================== -->
+        <section id="view-setup" class="hidden space-y-4">
+            <!-- Thanh thông tin phòng & số tiếp theo -->
+            <div class="flex items-center justify-between bg-slate-900/80 px-4 py-2.5 rounded-2xl border border-white/10">
+                <div>
+                    <span id="setup-room-label" class="text-[11px] font-bold uppercase tracking-wider text-cyan-300 block">PHÒNG #----</span>
+                    <h2 class="text-base sm:text-lg font-extrabold text-white">Bước 1: Xếp số 1–25 vào bảng</h2>
+                </div>
+                <div class="text-right bg-indigo-950 border border-indigo-400/40 px-3.5 py-1 rounded-xl">
+                    <span class="text-[10px] text-indigo-300 block uppercase">Số cần đặt</span>
+                    <span id="setup-next-number" class="text-xl font-black text-amber-300">1</span>
+                </div>
+            </div>
+
+            <!-- Trạng thái của đối phương -->
+            <div class="flex items-center justify-between px-3.5 py-2 rounded-xl bg-slate-900/60 border border-white/10 text-xs">
+                <span id="setup-opp-name" class="font-bold text-slate-200">Đối thủ: ...</span>
+                <span id="setup-opp-status" class="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold">
+                    ⏳ Đang xếp số...
+                </span>
+            </div>
+
+            <!-- Hướng dẫn ngắn -->
+            <p class="text-xs text-center text-slate-300">
+                👆 Bấm vào các ô trống để lần lượt đặt số từ <b class="text-amber-300">1 đến 25</b>, hoặc bấm <b class="text-emerald-300">Xếp Ngẫu Nhiên</b>.
+            </p>
+
+            <!-- Lưới 5x5 để điền số -->
+            <div id="grid-setup" class="bingo-grid"></div>
+
+            <!-- Các nút công cụ xếp nhanh -->
+            <div class="grid grid-cols-3 gap-2 pt-1">
+                <button id="btn-setup-random" onclick="fillRandomSetup()"
+                    class="py-2.5 px-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs sm:text-sm font-bold shadow transition cursor-pointer">
+                    🎲 Xếp Ngẫu Nhiên
+                </button>
+                <button id="btn-setup-undo" onclick="undoSetupCell()"
+                    class="py-2.5 px-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-xs sm:text-sm font-bold shadow transition cursor-pointer disabled:opacity-40">
+                    ↩️ Hoàn Tác
+                </button>
+                <button id="btn-setup-clear" onclick="clearSetupGrid()"
+                    class="py-2.5 px-2 rounded-xl bg-rose-600/80 hover:bg-rose-500 text-xs sm:text-sm font-bold shadow transition cursor-pointer">
+                    🗑️ Xóa Hết
+                </button>
+            </div>
+
+            <!-- Nút chốt bảng sẵn sàng -->
+            <button id="btn-setup-ready" onclick="confirmSetupReady()" disabled
+                class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 to-pink-500 hover:from-amber-300 hover:to-pink-400 text-slate-950 font-black text-base shadow-xl transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                Hãy điền đủ 25 ô (0/25)
+            </button>
+        </section>
+
+        <!-- ==========================================
+             MÀN HÌNH 3: VÀO TRẬN ĐẤU BINGO 5 ĐƯỜNG
+             ========================================== -->
+        <section id="view-play" class="hidden space-y-4">
+            <!-- Thanh thông tin 2 người chơi & Tiến độ đường -->
+            <div class="grid grid-cols-2 gap-2.5">
+                <!-- Thẻ của Bạn -->
+                <div class="bg-slate-900/80 border border-amber-400/40 rounded-2xl p-3 flex items-center justify-between">
+                    <div class="truncate pr-1">
+                        <span class="text-[10px] uppercase tracking-wider text-amber-300 font-bold block">BẢNG CỦA BẠN</span>
+                        <span id="play-my-name" class="font-extrabold text-sm sm:text-base text-white truncate block">Bạn</span>
+                    </div>
+                    <div class="text-right shrink-0">
+                        <span id="play-my-lines" class="text-xl sm:text-2xl font-black text-amber-300">0/5</span>
+                        <span class="text-[10px] text-slate-400 block">đường</span>
+                    </div>
+                </div>
+
+                <!-- Thẻ của Đối thủ -->
+                <div class="bg-slate-900/80 border border-cyan-400/30 rounded-2xl p-3 flex items-center justify-between">
+                    <div class="truncate pr-1">
+                        <span class="text-[10px] uppercase tracking-wider text-cyan-300 font-bold block">ĐỐI THỦ</span>
+                        <span id="play-opp-name" class="font-extrabold text-sm sm:text-base text-white truncate block">Đối thủ</span>
+                    </div>
+                    <div class="text-right shrink-0">
+                        <span id="play-opp-lines" class="text-xl sm:text-2xl font-black text-cyan-300">0/5</span>
+                        <span class="text-[10px] text-slate-400 block">đường</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5 Chữ cái B - I - N - G - O tượng trưng cho 5 đường -->
+            <div class="flex items-center justify-between bg-slate-900/90 px-4 py-2.5 rounded-2xl border border-white/10">
+                <div class="flex items-center gap-1.5 sm:gap-2">
+                    <span id="letter-0" class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-sm sm:text-base text-slate-500 transition-all">B</span>
+                    <span id="letter-1" class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-sm sm:text-base text-slate-500 transition-all">I</span>
+                    <span id="letter-2" class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-sm sm:text-base text-slate-500 transition-all">N</span>
+                    <span id="letter-3" class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-sm sm:text-base text-slate-500 transition-all">G</span>
+                    <span id="letter-4" class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-sm sm:text-base text-slate-500 transition-all">O</span>
+                </div>
+                <div class="text-right">
+                    <span class="text-[11px] text-slate-400 block">Số vừa gọi:</span>
+                    <span id="play-last-num" class="text-lg sm:text-xl font-black text-pink-400">--</span>
+                </div>
+            </div>
+
+            <!-- Thông báo Lượt đi -->
+            <div id="play-turn-box" class="py-2.5 px-4 rounded-2xl text-center font-extrabold text-sm sm:text-base border transition-all">
+                Đang tải lượt chơi...
+            </div>
+
+            <!-- Lưới 5x5 khi chiến đấu -->
+            <div id="grid-play" class="bingo-grid"></div>
+
+            <!-- Lịch sử các số đã gọi -->
+            <div class="bg-slate-900/60 p-3 rounded-2xl border border-white/10 space-y-1.5">
+                <div class="flex justify-between items-center text-xs text-slate-400">
+                    <span>Các số đã gạch (<b id="play-called-count" class="text-white">0</b>/25):</span>
+                    <button onclick="leaveToLobby()" class="text-rose-400 hover:underline font-semibold cursor-pointer">Thoát phòng</button>
+                </div>
+                <div id="play-called-list" class="flex flex-wrap gap-1.5 min-h-[26px]"></div>
+            </div>
+        </section>
+
+        <!-- ==========================================
+             MÀN HÌNH 4: KẾT QUẢ & ĐỐI CHIẾU 2 BẢNG
+             ========================================== -->
+        <section id="view-result" class="hidden space-y-5 text-center py-2">
+            <div class="space-y-1">
+                <div id="res-icon" class="text-5xl sm:text-6xl mb-2">🏆</div>
+                <h2 id="res-title" class="text-2xl sm:text-3xl font-black text-amber-300">BINGO! CHIẾN THẮNG!</h2>
+                <p id="res-subtitle" class="text-sm sm:text-base text-pink-200 font-semibold"></p>
+            </div>
+
+            <!-- Đối chiếu 2 bảng 5x5 của 2 máy -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left">
+                <div class="bg-slate-900/80 p-3 rounded-2xl border border-amber-400/40">
+                    <div class="flex justify-between items-center mb-2">
+                        <span id="res-name-0" class="font-bold text-xs text-amber-300 truncate">Người chơi 1</span>
+                        <span id="res-lines-0" class="text-xs bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded-full font-extrabold">0 đường</span>
+                    </div>
+                    <div id="res-grid-0" class="grid grid-cols-5 gap-1"></div>
+                </div>
+
+                <div class="bg-slate-900/80 p-3 rounded-2xl border border-cyan-400/40">
+                    <div class="flex justify-between items-center mb-2">
+                        <span id="res-name-1" class="font-bold text-xs text-cyan-300 truncate">Người chơi 2</span>
+                        <span id="res-lines-1" class="text-xs bg-cyan-400/20 text-cyan-300 px-2 py-0.5 rounded-full font-extrabold">0 đường</span>
+                    </div>
+                    <div id="res-grid-1" class="grid grid-cols-5 gap-1"></div>
+                </div>
+            </div>
+
+            <div class="flex gap-3 pt-2">
+                <button onclick="leaveToLobby()"
+                    class="w-1/3 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-xs sm:text-sm font-bold transition cursor-pointer">
+                    🏠 Về Sảnh
+                </button>
+                <button onclick="requestRematch()"
+                    class="w-2/3 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-pink-500 hover:from-amber-300 hover:to-pink-400 text-slate-950 font-black text-sm sm:text-base shadow-xl transition cursor-pointer">
+                    🔄 Chơi Ván Mới Cùng Phòng
+                </button>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ==========================================
+         TẦNG ĐÁM MÂY FIREBASE + DỰ PHÒNG WEBRTC (PEERJS)
+         Giúp game chạy mượt cả trên Canvas lẫn khi bạn xuất file đẩy lên Cloud riêng!
+         ========================================== -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'bingo-25-cloud-v2';
+        let db = null;
+        let auth = null;
+        let currentUser = null;
+        let unsubFirestore = null;
+
+        async function setupFirebaseCloud() {
+            try {
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    const config = JSON.parse(__firebase_config);
+                    const app = initializeApp(config);
+                    auth = getAuth(app);
+                    db = getFirestore(app);
+
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+
+                    onAuthStateChanged(auth, (user) => {
+                        currentUser = user;
+                        if (user) {
+                            window.cloudMode = 'firebase';
+                            window.updateNetBadge(true, 'Đã kết nối Đám Mây (Firebase Realtime)');
+                        }
+                    });
+                    return;
+                }
+            } catch (e) {
+                console.warn("Firebase không khả dụng, chuyển sang kết nối Đám Mây PeerJS trực tiếp:", e);
+            }
+
+            // Nếu bạn tải file HTML về và đẩy lên Github Pages / Vercel / Netlify (không có biến __firebase_config)
+            // Hệ thống tự động dùng Cloud PeerJS để 2 máy khác nhau vẫn tạo mã 4 số và chơi được ngay!
+            window.cloudMode = 'peerjs';
+            window.updateNetBadge(true, 'Đã sẵn sàng Đám Mây (Direct Cloud 2 Máy)');
+        }
+
+        function roomRef(code) {
+            return doc(db, 'artifacts', appId, 'public', 'data', 'bingo25_rooms', 'room_' + code);
+        }
+
+        window.fbCreateRoom = async function(code, initialState) {
+            if (!currentUser || !db) throw new Error("Đang kết nối đám mây, vui lòng thử lại sau 1 giây!");
+            const ref = roomRef(code);
+            await setDoc(ref, initialState);
+            listenRoom(code);
+        };
+
+        window.fbJoinRoom = async function(code, guestName) {
+            if (!currentUser || !db) throw new Error("Đang kết nối đám mây, vui lòng thử lại sau 1 giây!");
+            const ref = roomRef(code);
+            const snap = await getDoc(ref);
+            if (!snap.exists()) {
+                throw new Error(`Không tìm thấy phòng #${code}. Hãy kiểm tra lại mã phòng!`);
+            }
+            const data = snap.data();
+            await updateDoc(ref, {
+                guestName: guestName,
+                phase: 'setup',
+                updatedAt: Date.now()
+            });
+            listenRoom(code);
+        };
+
+        window.fbPatchRoom = async function(code, patchObj) {
+            if (!currentUser || !db) return;
+            const ref = roomRef(code);
+            patchObj.updatedAt = Date.now();
+            await updateDoc(ref, patchObj);
+        };
+
+        window.fbStopListen = function() {
+            if (unsubFirestore) {
+                unsubFirestore();
+                unsubFirestore = null;
+            }
+        };
+
+        function listenRoom(code) {
+            window.fbStopListen();
+            const ref = roomRef(code);
+            unsubFirestore = onSnapshot(
+                ref,
+                (snap) => {
+                    if (snap.exists()) {
+                        window.onRoomDataSynced(snap.data());
+                    }
+                },
+                (err) => console.error("Firestore listen error:", err)
+            );
+        }
+
+        setupFirebaseCloud();
+    </script>
+
+    <!-- ==========================================
+         LOGIC TRÒ CHƠI BINGO 25 SỐ (1–25)
+         ========================================== -->
+    <script>
+        // 12 Đường chiến thắng trong bảng 5x5 (5 ngang, 5 dọc, 2 chéo)
+        const BINGO_LINES = [
+            // 5 hàng ngang
+            [0, 1, 2, 3, 4],
+            [5, 6, 7, 8, 9],
+            [10, 11, 12, 13, 14],
+            [15, 16, 17, 18, 19],
+            [20, 21, 22, 23, 24],
+            // 5 cột dọc
+            [0, 5, 10, 15, 20],
+            [1, 6, 11, 16, 21],
+            [2, 7, 12, 17, 22],
+            [3, 8, 13, 18, 23],
+            [4, 9, 14, 19, 24],
+            // 2 đường chéo
+            [0, 6, 12, 18, 24],
+            [4, 8, 12, 16, 20]
+        ];
+
+        window.cloudMode = 'peerjs'; // 'firebase' hoặc 'peerjs' hoặc 'bot'
+        let myRole = 0; // 0: Chủ phòng (Máy 1), 1: Khách (Máy 2)
+        let activeRoomCode = '';
+        let roomState = null;
+
+        // Trạng thái xếp bảng cục bộ trên máy của mình
+        let mySetupBoard = Array(25).fill(0);
+        let nextNumToPlace = 1;
+        let placementStack = [];
+        let hasLockedSetup = false;
+        let isSendingMove = false;
+
+        // Biến dùng cho PeerJS (khi triển khai lên host tĩnh bên ngoài)
+        let peerInstance = null;
+        let peerConn = null;
+
+        window.updateNetBadge = function(ok, text) {
+            const dot = document.getElementById('net-dot');
+            const lbl = document.getElementById('net-status');
+            if (lbl) lbl.innerText = text;
+            if (dot) {
+                dot.className = ok
+                    ? 'w-2 h-2 rounded-full bg-emerald-400 animate-ping'
+                    : 'w-2 h-2 rounded-full bg-rose-400';
+            }
+        };
+
+        function switchView(viewId) {
+            ['view-lobby', 'view-setup', 'view-play', 'view-result'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+            document.getElementById(viewId).classList.remove('hidden');
+        }
+
+        function showLobbyError(msg) {
+            const box = document.getElementById('lobby-error');
+            if (!msg) {
+                box.classList.add('hidden');
+            } else {
+                box.innerText = msg;
+                box.classList.remove('hidden');
+            }
+        }
+
+        function createInitialRoomObject(code, hostName) {
+            return {
+                roomCode: code,
+                phase: 'waiting', // waiting | setup | playing | finished
+                hostName: hostName,
+                guestName: 'Đang chờ...',
+                hostBoardJson: '[]',
+                guestBoardJson: '[]',
+                hostReady: false,
+                guestReady: false,
+                calledJson: '[]',
+                turn: 0, // 0: Host, 1: Guest
+                winnerTitle: '',
+                winnerSub: ''
+            };
+        }
+
+        // ================= 1. TẠO PHÒNG & VÀO PHÒNG =================
+
+        async function handleCreateRoom() {
+            showLobbyError('');
+            const myName = document.getElementById('inp-player-name').value.trim() || 'Máy 1';
+            const code = String(Math.floor(1000 + Math.random() * 9000));
+            const btn = document.getElementById('btn-create');
+            btn.disabled = true;
+            btn.innerText = '⏳ Đang tạo...';
+
+            myRole = 0;
+            activeRoomCode = code;
+            const initObj = createInitialRoomObject(code, myName);
+
+            try {
+                if (window.cloudMode === 'firebase') {
+                    await window.fbCreateRoom(code, initObj);
+                } else {
+                    await createPeerRoom(code, initObj);
+                }
+
+                document.getElementById('lobby-actions').classList.add('hidden');
+                document.getElementById('lobby-waiting').classList.remove('hidden');
+                document.getElementById('txt-room-code').innerText = code;
+            } catch (err) {
+                showLobbyError(err.message || 'Không thể tạo phòng, vui lòng thử lại!');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = '➕ Tạo Phòng Mới';
+            }
+        }
+
+        async function handleJoinRoom() {
+            showLobbyError('');
+            const myName = document.getElementById('inp-player-name').value.trim() || 'Máy 2';
+            const code = document.getElementById('inp-room-code').value.trim();
+            if (code.length !== 4) {
+                showLobbyError('Vui lòng nhập đúng mã phòng gồm 4 chữ số!');
+                return;
+            }
+
+            const btn = document.getElementById('btn-join');
+            btn.disabled = true;
+            btn.innerText = '⏳ Đang kết nối...';
+
+            myRole = 1;
+            activeRoomCode = code;
+
+            try {
+                if (window.cloudMode === 'firebase') {
+                    await window.fbJoinRoom(code, myName);
+                } else {
+                    await joinPeerRoom(code, myName);
+                }
+            } catch (err) {
+                showLobbyError(err.message || 'Không tìm thấy phòng hoặc kết nối thất bại!');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = '🚀 Vào Phòng Ngay';
+            }
+        }
+
+        // --- Nhánh PeerJS dự phòng cho 2 máy khi chạy ngoài môi trường Firebase ---
+        function createPeerRoom(code, initObj) {
+            return new Promise((resolve, reject) => {
+                if (peerInstance) peerInstance.destroy();
+                const peerId = 'bingo25-vn-room-' + code;
+                peerInstance = new Peer(peerId);
+
+                peerInstance.on('open', () => {
+                    roomState = initObj;
+                    resolve();
+                });
+
+                peerInstance.on('connection', (conn) => {
+                    peerConn = conn;
+                    conn.on('data', (msg) => {
+                        if (msg.type === 'JOIN') {
+                            roomState.guestName = msg.guestName;
+                            roomState.phase = 'setup';
+                            broadcastPeerState();
+                        } else if (msg.type === 'PATCH') {
+                            Object.assign(roomState, msg.patch);
+                            checkAutoStartPlayInHost();
+                            broadcastPeerState();
+                        }
+                    });
+                });
+
+                peerInstance.on('error', (err) => {
+                    reject(new Error('Lỗi tạo mã phòng trực tuyến: ' + err.type));
+                });
+            });
+        }
+
+        function joinPeerRoom(code, guestName) {
+            return new Promise((resolve, reject) => {
+                if (peerInstance) peerInstance.destroy();
+                peerInstance = new Peer();
+
+                peerInstance.on('open', () => {
+                    const hostPeerId = 'bingo25-vn-room-' + code;
+                    const conn = peerInstance.connect(hostPeerId, { reliable: true });
+                    let connected = false;
+
+                    const timer = setTimeout(() => {
+                        if (!connected) reject(new Error(`Không tìm thấy phòng #${code}!`));
+                    }, 6000);
+
+                    conn.on('open', () => {
+                        connected = true;
+                        clearTimeout(timer);
+                        peerConn = conn;
+                        conn.send({ type: 'JOIN', guestName });
+                        resolve();
+                    });
+
+                    conn.on('data', (msg) => {
+                        if (msg.type === 'STATE') {
+                            window.onRoomDataSynced(msg.state);
+                        }
+                    });
+
+                    conn.on('error', () => {
+                        clearTimeout(timer);
+                        reject(new Error('Lỗi kết nối tới phòng!'));
+                    });
+                });
+            });
+        }
+
+        function broadcastPeerState() {
+            if (peerConn && peerConn.open) {
+                peerConn.send({ type: 'STATE', state: roomState });
+            }
+            window.onRoomDataSynced({ ...roomState });
+        }
+
+        function checkAutoStartPlayInHost() {
+            if (roomState.phase === 'setup' && roomState.hostReady && roomState.guestReady) {
+                roomState.phase = 'playing';
+            }
+        }
+
+        // Hàm gửi cập nhật dữ liệu chung cho cả Firebase, PeerJS và Bot
+        async function patchRoomState(patch) {
+            if (window.cloudMode === 'bot') {
+                Object.assign(roomState, patch);
+                window.onRoomDataSynced({ ...roomState });
+                return;
+            }
+            if (window.cloudMode === 'firebase') {
+                await window.fbPatchRoom(activeRoomCode, patch);
+            } else {
+                if (myRole === 0) {
+                    Object.assign(roomState, patch);
+                    checkAutoStartPlayInHost();
+                    broadcastPeerState();
+                } else if (peerConn && peerConn.open) {
+                    peerConn.send({ type: 'PATCH', patch });
+                }
+            }
+        }
+
+        function copyCode() {
+            if (!activeRoomCode) return;
+            const el = document.createElement('input');
+            el.value = activeRoomCode;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+
+            const notice = document.getElementById('copy-notice');
+            notice.classList.remove('hidden');
+            setTimeout(() => notice.classList.add('hidden'), 2000);
+        }
+
+        function cancelWaitingRoom() {
+            if (window.fbStopListen) window.fbStopListen();
+            if (peerInstance) peerInstance.destroy();
+            document.getElementById('lobby-waiting').classList.add('hidden');
+            document.getElementById('lobby-actions').classList.remove('hidden');
+        }
+
+        // ================= ĐỒNG BỘ TRẠNG THÁI PHÒNG =================
+
+        let lastPhase = '';
+
+        window.onRoomDataSynced = function(data) {
+            roomState = data;
+
+            // Khi cả 2 đều đã sẵn sàng ở Firebase thì chuyển sang 'playing'
+            if (window.cloudMode === 'firebase' && myRole === 0 && data.phase === 'setup' && data.hostReady && data.guestReady) {
+                window.fbPatchRoom(activeRoomCode, { phase: 'playing' });
+                return;
+            }
+
+            if (data.phase === 'setup') {
+                if (lastPhase !== 'setup') {
+                    initLocalSetupPhase();
+                }
+                updateSetupOpponentUI();
+                switchView('view-setup');
+            } else if (data.phase === 'playing') {
+                renderPlayPhase();
+                switchView('view-play');
+            } else if (data.phase === 'finished') {
+                renderResultPhase();
+                switchView('view-result');
+            }
+
+            lastPhase = data.phase;
+        };
+
+        // ================= 2. GIAI ĐOẠN XẾP SỐ 1-25 =================
+
+        function initLocalSetupPhase() {
+            mySetupBoard = Array(25).fill(0);
+            nextNumToPlace = 1;
+            placementStack = [];
+            hasLockedSetup = false;
+            document.getElementById('setup-room-label').innerText =
+                window.cloudMode === 'bot' ? 'CHẾ ĐỘ ĐẤU VỚI MÁY (AI)' : `PHÒNG #${activeRoomCode}`;
+            renderSetupGrid();
+        }
+
+        function updateSetupOpponentUI() {
+            if (!roomState) return;
+            const oppName = myRole === 0 ? roomState.guestName : roomState.hostName;
+            const oppReady = myRole === 0 ? roomState.guestReady : roomState.hostReady;
+
+            document.getElementById('setup-opp-name').innerText = `Đối thủ: ${oppName}`;
+            const badge = document.getElementById('setup-opp-status');
+            if (oppReady) {
+                badge.innerText = '✅ Đã sẵn sàng!';
+                badge.className = 'px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-400/40';
+            } else {
+                badge.innerText = '⏳ Đang xếp số...';
+                badge.className = 'px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold';
+            }
+        }
+
+        function renderSetupGrid() {
+            const container = document.getElementById('grid-setup');
+            container.innerHTML = '';
+
+            for (let i = 0; i < 25; i++) {
+                const val = mySetupBoard[i];
+                const btn = document.createElement('button');
+                btn.type = 'button';
+
+                if (val === 0) {
+                    btn.className = 'bingo-cell rounded-xl sm:rounded-2xl bg-slate-800/90 hover:bg-slate-700 border-2 border-dashed border-slate-600 flex items-center justify-center text-lg sm:text-2xl font-bold text-slate-400 cursor-pointer';
+                    btn.innerText = '';
+                    btn.onclick = () => placeNumberAt(i);
+                } else {
+                    const isLast = placementStack[placementStack.length - 1] === i;
+                    btn.className = `bingo-cell rounded-xl sm:rounded-2xl ${
+                        isLast
+                            ? 'bg-amber-400 text-slate-950 border-2 border-yellow-200'
+                            : 'bg-indigo-600 text-white border-2 border-indigo-400'
+                    } flex items-center justify-center text-lg sm:text-2xl font-black shadow-md animate-pop cursor-pointer`;
+                    btn.innerText = val;
+                    btn.onclick = () => {
+                        if (isLast && !hasLockedSetup) undoSetupCell();
+                    };
+                }
+                container.appendChild(btn);
+            }
+
+            const nextEl = document.getElementById('setup-next-number');
+            const readyBtn = document.getElementById('btn-setup-ready');
+            const undoBtn = document.getElementById('btn-setup-undo');
+            const filled = nextNumToPlace - 1;
+
+            undoBtn.disabled = filled === 0 || hasLockedSetup;
+            document.getElementById('btn-setup-random').disabled = hasLockedSetup;
+            document.getElementById('btn-setup-clear').disabled = hasLockedSetup;
+
+            if (hasLockedSetup) {
+                nextEl.innerText = 'XONG';
+                readyBtn.disabled = true;
+                readyBtn.innerText = '⏳ Đã chốt bảng! Đang chờ đối thủ...';
+            } else if (nextNumToPlace <= 25) {
+                nextEl.innerText = nextNumToPlace;
+                readyBtn.disabled = true;
+                readyBtn.innerText = `Hãy điền đủ 25 ô (${filled}/25)`;
+            } else {
+                nextEl.innerText = 'ĐỦ 25';
+                readyBtn.disabled = false;
+                readyBtn.innerText = '🚀 SẴN SÀNG VÀO TRẬN!';
+            }
+        }
+
+        function placeNumberAt(idx) {
+            if (hasLockedSetup || nextNumToPlace > 25 || mySetupBoard[idx] !== 0) return;
+            mySetupBoard[idx] = nextNumToPlace;
+            placementStack.push(idx);
+            nextNumToPlace++;
+            renderSetupGrid();
+        }
+
+        function undoSetupCell() {
+            if (hasLockedSetup || placementStack.length === 0) return;
+            const idx = placementStack.pop();
+            mySetupBoard[idx] = 0;
+            nextNumToPlace--;
+            renderSetupGrid();
+        }
+
+        function clearSetupGrid() {
+            if (hasLockedSetup) return;
+            mySetupBoard = Array(25).fill(0);
+            nextNumToPlace = 1;
+            placementStack = [];
+            renderSetupGrid();
+        }
+
+        function generateShuffled25() {
+            const arr = Array.from({ length: 25 }, (_, i) => i + 1);
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        }
+
+        function fillRandomSetup() {
+            if (hasLockedSetup) return;
+            mySetupBoard = generateShuffled25();
+            placementStack = Array.from({ length: 25 }, (_, i) => i);
+            nextNumToPlace = 26;
+            renderSetupGrid();
+        }
+
+        async function confirmSetupReady() {
+            if (nextNumToPlace <= 25 || hasLockedSetup) return;
+            hasLockedSetup = true;
+            renderSetupGrid();
+
+            const boardJson = JSON.stringify(mySetupBoard);
+            if (myRole === 0) {
+                const patch = { hostBoardJson: boardJson, hostReady: true };
+                if (roomState.guestReady) patch.phase = 'playing';
+                await patchRoomState(patch);
+            } else {
+                const patch = { guestBoardJson: boardJson, guestReady: true };
+                if (roomState.hostReady) patch.phase = 'playing';
+                await patchRoomState(patch);
+            }
+        }
+
+        // ================= 3. GIAI ĐOẠN CHIẾN ĐẤU (CHỌN SỐ & GẠCH ĐƯỜNG) =================
+
+        function analyzeBoardLines(boardArr, calledArr) {
+            if (!boardArr || boardArr.length !== 25) {
+                return { linesCount: 0, cellsInLines: new Set() };
+            }
+            const calledSet = new Set(calledArr);
+            let linesCount = 0;
+            const cellsInLines = new Set();
+
+            for (const line of BINGO_LINES) {
+                const isFull = line.every(cellIdx => calledSet.has(boardArr[cellIdx]));
+                if (isFull) {
+                    linesCount++;
+                    line.forEach(cellIdx => cellsInLines.add(cellIdx));
+                }
+            }
+            return { linesCount, cellsInLines };
+        }
+
+        function parseRoomBoards() {
+            let b0 = [], b1 = [], called = [];
+            try { b0 = JSON.parse(roomState.hostBoardJson || '[]'); } catch (e) {}
+            try { b1 = JSON.parse(roomState.guestBoardJson || '[]'); } catch (e) {}
+            try { called = JSON.parse(roomState.calledJson || '[]'); } catch (e) {}
+            return { b0, b1, called };
+        }
+
+        function renderPlayPhase() {
+            const { b0, b1, called } = parseRoomBoards();
+            const myBoard = myRole === 0 ? b0 : b1;
+            const oppBoard = myRole === 0 ? b1 : b0;
+
+            const myName = myRole === 0 ? roomState.hostName : roomState.guestName;
+            const oppName = myRole === 0 ? roomState.guestName : roomState.hostName;
+
+            const myStat = analyzeBoardLines(myBoard, called);
+            const oppStat = analyzeBoardLines(oppBoard, called);
+
+            document.getElementById('play-my-name').innerText = myName;
+            document.getElementById('play-opp-name').innerText = oppName;
+            document.getElementById('play-my-lines').innerText = `${Math.min(5, myStat.linesCount)}/5`;
+            document.getElementById('play-opp-lines').innerText = `${Math.min(5, oppStat.linesCount)}/5`;
+
+            // Thắp sáng 5 chữ B - I - N - G - O
+            for (let i = 0; i < 5; i++) {
+                const el = document.getElementById('letter-' + i);
+                if (i < myStat.linesCount) {
+                    el.className = 'w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-amber-300 to-orange-500 text-slate-950 flex items-center justify-center font-black text-sm sm:text-base shadow-lg scale-105 transition-all';
+                } else {
+                    el.className = 'w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-sm sm:text-base text-slate-500 transition-all';
+                }
+            }
+
+            // Số vừa gọi
+            const lastNum = called.length > 0 ? called[called.length - 1] : null;
+            document.getElementById('play-last-num').innerText = lastNum ? `#${lastNum}` : '--';
+
+            // Thông báo lượt
+            const turnBox = document.getElementById('play-turn-box');
+            const isMyTurn = roomState.turn === myRole;
+            if (isMyTurn) {
+                turnBox.innerText = '👉 ĐẾN LƯỢT BẠN: Hãy bấm chọn 1 số trên bảng!';
+                turnBox.className = 'py-2.5 px-4 rounded-2xl text-center font-extrabold text-sm sm:text-base bg-amber-400/20 border-2 border-amber-400 text-amber-300 shadow-lg';
+            } else {
+                turnBox.innerText = `⏳ Đang đợi ${oppName} chọn số...`;
+                turnBox.className = 'py-2.5 px-4 rounded-2xl text-center font-bold text-sm sm:text-base bg-slate-900/70 border border-cyan-400/30 text-cyan-300 animate-pulse';
+            }
+
+            // Vẽ bảng 5x5 của mình
+            const grid = document.getElementById('grid-play');
+            grid.innerHTML = '';
+            const calledSet = new Set(called);
+
+            for (let i = 0; i < 25; i++) {
+                const num = myBoard[i];
+                const isMarked = calledSet.has(num);
+                const inLine = myStat.cellsInLines.has(i);
+                const isLast = num === lastNum;
+
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.innerText = num;
+
+                let cls = 'bingo-cell rounded-xl sm:rounded-2xl flex items-center justify-center text-lg sm:text-2xl font-black border-2 ';
+                if (inLine) {
+                    cls += 'cell-line-complete ';
+                } else if (isMarked) {
+                    cls += 'cell-marked ';
+                } else {
+                    cls += 'bg-slate-800/90 hover:bg-slate-700 text-white border-slate-600 ';
+                    if (isMyTurn) cls += 'hover:border-amber-400 cursor-pointer ';
+                }
+
+                if (isLast) cls += 'cell-last-called ';
+                btn.className = cls;
+
+                btn.disabled = isMarked || !isMyTurn || isSendingMove;
+                btn.onclick = () => selectNumberInPlay(num);
+                grid.appendChild(btn);
+            }
+
+            // Vẽ danh sách các số đã gọi
+            document.getElementById('play-called-count').innerText = called.length;
+            const listEl = document.getElementById('play-called-list');
+            listEl.innerHTML = '';
+            called.forEach((n, idx) => {
+                const tag = document.createElement('span');
+                const newest = idx === called.length - 1;
+                tag.className = newest
+                    ? 'px-2 py-0.5 rounded-lg bg-amber-400 text-slate-950 font-black text-xs'
+                    : 'px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300 font-bold text-xs';
+                tag.innerText = n;
+                listEl.appendChild(tag);
+            });
+        }
+
+        async function selectNumberInPlay(num) {
+            if (isSendingMove || !roomState || roomState.turn !== myRole) return;
+            const { b0, b1, called } = parseRoomBoards();
+            if (called.includes(num)) return;
+
+            isSendingMove = true;
+            const nextCalled = [...called, num];
+            const nextTurn = myRole === 0 ? 1 : 0;
+
+            const stat0 = analyzeBoardLines(b0, nextCalled);
+            const stat1 = analyzeBoardLines(b1, nextCalled);
+
+            const patch = {
+                calledJson: JSON.stringify(nextCalled),
+                turn: nextTurn
+            };
+
+            // Kiểm tra điều kiện thắng đủ 5 đường
+            if (stat0.linesCount >= 5 || stat1.linesCount >= 5) {
+                patch.phase = 'finished';
+                const outcome = buildWinnerText(stat0.linesCount, stat1.linesCount, myRole);
+                patch.winnerTitle = outcome.title;
+                patch.winnerSub = outcome.sub;
+            }
+
+            try {
+                await patchRoomState(patch);
+
+                // Nếu đang đấu với Bot AI và trận đấu chưa kết thúc thì tới lượt Bot chọn
+                if (window.cloudMode === 'bot' && patch.phase !== 'finished' && nextTurn === 1) {
+                    setTimeout(() => makeBotMove(), 650);
+                }
+            } finally {
+                isSendingMove = false;
+            }
+        }
+
+        function buildWinnerText(lines0, lines1, callerRole) {
+            const name0 = roomState.hostName;
+            const name1 = roomState.guestName;
+
+            if (lines0 >= 5 && lines1 >= 5) {
+                if (lines0 > lines1) {
+                    return { title: `🏆 ${name0} Chiến Thắng!`, sub: `Vượt trội với ${lines0} đường BINGO so với ${lines1} đường!` };
+                } else if (lines1 > lines0) {
+                    return { title: `🏆 ${name1} Chiến Thắng!`, sub: `Vượt trội với ${lines1} đường BINGO so với ${lines0} đường!` };
+                } else {
+                    const callerName = callerRole === 0 ? name0 : name1;
+                    return { title: `🏆 ${callerName} Thắng Sát Nút!`, sub: `Cả 2 cùng đạt ${lines0} đường nhưng ${callerName} là người gọi số quyết định!` };
+                }
+            } else if (lines0 >= 5) {
+                return { title: `🏆 ${name0} Chiến Thắng!`, sub: `Đã hoàn thành đủ ${lines0} đường BINGO trước!` };
+            } else {
+                return { title: `🏆 ${name1} Chiến Thắng!`, sub: `Đã hoàn thành đủ ${lines1} đường BINGO trước!` };
+            }
+        }
+
+        // ================= 4. MÀN HÌNH KẾT QUẢ & ĐỐI CHIẾU 2 BẢNG =================
+
+        function renderResultPhase() {
+            const { b0, b1, called } = parseRoomBoards();
+            const stat0 = analyzeBoardLines(b0, called);
+            const stat1 = analyzeBoardLines(b1, called);
+
+            document.getElementById('res-title').innerText = roomState.winnerTitle || 'BINGO! KẾT THÚC!';
+            document.getElementById('res-subtitle').innerText = roomState.winnerSub || '';
+
+            document.getElementById('res-name-0').innerText = roomState.hostName;
+            document.getElementById('res-name-1').innerText = roomState.guestName;
+            document.getElementById('res-lines-0').innerText = `${stat0.linesCount} đường`;
+            document.getElementById('res-lines-1').innerText = `${stat1.linesCount} đường`;
+
+            renderMiniBoard('res-grid-0', b0, called, stat0.cellsInLines);
+            renderMiniBoard('res-grid-1', b1, called, stat1.cellsInLines);
+        }
+
+        function renderMiniBoard(containerId, boardArr, calledArr, cellsInLines) {
+            const el = document.getElementById(containerId);
+            el.innerHTML = '';
+            const calledSet = new Set(calledArr);
+
+            for (let i = 0; i < 25; i++) {
+                const n = boardArr[i] || '';
+                const div = document.createElement('div');
+                let cls = 'aspect-square rounded-lg flex items-center justify-center text-xs font-extrabold border ';
+                if (cellsInLines.has(i)) {
+                    cls += 'bg-amber-400 text-slate-950 border-yellow-200';
+                } else if (calledSet.has(n)) {
+                    cls += 'bg-pink-600/80 text-white border-pink-400';
+                } else {
+                    cls += 'bg-slate-800 text-slate-400 border-slate-700';
+                }
+                div.className = cls;
+                div.innerText = n;
+                el.appendChild(div);
+            }
+        }
+
+        async function requestRematch() {
+            if (window.cloudMode === 'bot') {
+                startBotPractice();
+                return;
+            }
+            await patchRoomState({
+                phase: 'setup',
+                hostBoardJson: '[]',
+                guestBoardJson: '[]',
+                hostReady: false,
+                guestReady: false,
+                calledJson: '[]',
+                turn: 0,
+                winnerTitle: '',
+                winnerSub: ''
+            });
+        }
+
+        function leaveToLobby() {
+            if (window.fbStopListen) window.fbStopListen();
+            if (peerInstance) peerInstance.destroy();
+            lastPhase = '';
+            document.getElementById('lobby-waiting').classList.add('hidden');
+            document.getElementById('lobby-actions').classList.remove('hidden');
+            switchView('view-lobby');
+        }
+
+        // ================= CHẾ ĐỘ PHỤ: LUYỆN TẬP VỚI MÁY (AI) =================
+
+        function startBotPractice() {
+            const myName = document.getElementById('inp-player-name').value.trim() || 'Bạn';
+            window.cloudMode = 'bot';
+            myRole = 0;
+            activeRoomCode = 'BOT';
+            lastPhase = '';
+
+            const botBoard = generateShuffled25();
+            roomState = {
+                roomCode: 'BOT',
+                phase: 'setup',
+                hostName: myName,
+                guestName: 'Máy (AI) 🤖',
+                hostBoardJson: '[]',
+                guestBoardJson: JSON.stringify(botBoard),
+                hostReady: false,
+                guestReady: true,
+                calledJson: '[]',
+                turn: 0,
+                winnerTitle: '',
+                winnerSub: ''
+            };
+
+            window.onRoomDataSynced(roomState);
+        }
+
+        function makeBotMove() {
+            if (!roomState || roomState.phase !== 'playing') return;
+            const { b1, called } = parseRoomBoards();
+            const calledSet = new Set(called);
+
+            // AI thông minh: Ưu tiên chọn ô giúp AI hoàn thành nhiều đường nhất
+            let bestNum = null;
+            let bestScore = -1;
+
+            for (let i = 0; i < 25; i++) {
+                const candidate = b1[i];
+                if (calledSet.has(candidate)) continue;
+
+                let score = 0;
+                for (const line of BINGO_LINES) {
+                    if (line.includes(i)) {
+                        const markedCount = line.filter(idx => calledSet.has(b1[idx])).length;
+                        score += (markedCount + 1) * (markedCount + 1);
+                    }
+                }
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestNum = candidate;
+                }
+            }
+
+            if (bestNum !== null) {
+                const nextCalled = [...called, bestNum];
+                const { b0 } = parseRoomBoards();
+                const stat0 = analyzeBoardLines(b0, nextCalled);
+                const stat1 = analyzeBoardLines(b1, nextCalled);
+
+                const patch = {
+                    calledJson: JSON.stringify(nextCalled),
+                    turn: 0
+                };
+
+                if (stat0.linesCount >= 5 || stat1.linesCount >= 5) {
+                    patch.phase = 'finished';
+                    const outcome = buildWinnerText(stat0.linesCount, stat1.linesCount, 1);
+                    patch.winnerTitle = outcome.title;
+                    patch.winnerSub = outcome.sub;
+                }
+
+                patchRoomState(patch);
+            }
+        }
+    </script>
+</body>
+</html>
